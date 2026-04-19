@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import Product from '../models/Product.js';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
+import sendEmail from '../utils/sendEmail.js';
 
 // Helper function to generate JWT
 const generateToken = (id) => {
@@ -118,20 +119,45 @@ const forgotPassword = async (req, res) => {
 
     await user.save();
 
-    // In a real app, send email. For now, we'll return the token in response for development
-    // (User requested forget password conditions)
+    // Reset URL
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
 
-    // SMTP LOGIC (Placeholder)
-    /*
-    const transporter = nodemailer.createTransport({ ... });
-    await transporter.sendMail({ ... });
-    */
+    const message = `You are receiving this email because you (or someone else) has requested the reset of a password. Please make a PUT request to: \n\n ${resetUrl}`;
 
-    res.status(200).json({
-      success: true,
-      message: 'Password reset link generated',
-      resetToken // Returning this so frontend can proceed in dev
-    });
+    try {
+      await sendEmail({
+        email: user.email,
+        subject: 'Password reset token',
+        message,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+            <h2 style="color: #38bdf8; text-align: center;">Password Reset Request</h2>
+            <p>Hello ${user.username || 'User'},</p>
+            <p>You requested a password reset for your Navinila account. Click the button below to reset it:</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${resetUrl}" style="background-color: #38bdf8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Reset Password</a>
+            </div>
+            <p>This link will expire in 10 minutes.</p>
+            <p>If you didn't request this, please ignore this email.</p>
+            <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+            <p style="font-size: 12px; color: #94a3b8; text-align: center;">&copy; ${new Date().getFullYear()} Navinila. All rights reserved.</p>
+          </div>
+        `
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'Email sent',
+      });
+    } catch (err) {
+      console.error(err);
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpire = undefined;
+
+      await user.save();
+
+      return res.status(500).json({ message: 'Email could not be sent' });
+    }
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

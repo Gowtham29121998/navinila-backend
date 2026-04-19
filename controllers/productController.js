@@ -5,10 +5,19 @@ import Product from '../models/Product.js';
 // @access  Public
 const getProducts = async (req, res) => {
   try {
-    const products = await Product.find({}).populate('category');
-    res.json(products);
+    const pageSize = Number(req.query.pageSize) || 12;
+    const page = Number(req.query.pageNumber) || 1;
+
+    const count = await Product.countDocuments({});
+    const products = await Product.find({})
+      .populate('category')
+      .sort({ createdAt: -1 })
+      .limit(pageSize)
+      .skip(pageSize * (page - 1));
+
+    res.json({ products, page, pages: Math.ceil(count / pageSize), total: count });
   } catch (error) {
-    res.status(500).json({ message: 'Server Error' });
+    res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
 
@@ -17,10 +26,20 @@ const getProducts = async (req, res) => {
 // @access  Public
 const getProductsByCategory = async (req, res) => {
   try {
-    const products = await Product.find({ category: req.params.categoryId }).populate('category');
-    res.json(products);
+    const pageSize = Number(req.query.pageSize) || 12;
+    const page = Number(req.query.pageNumber) || 1;
+
+    const query = { category: req.params.categoryId };
+    const count = await Product.countDocuments(query);
+    const products = await Product.find(query)
+      .populate('category')
+      .sort({ createdAt: -1 })
+      .limit(pageSize)
+      .skip(pageSize * (page - 1));
+
+    res.json({ products, page, pages: Math.ceil(count / pageSize), total: count });
   } catch (error) {
-    res.status(500).json({ message: 'Server Error' });
+    res.status(500).json({ message: 'Server Error', error: error.message });
   }
 };
 
