@@ -51,7 +51,7 @@ const createProduct = async (req, res) => {
     const { 
       name, price, description, image, images, colors, 
       showColors, category, type, brand, discount, 
-      dimensions, countInStock 
+      material, packageIncludes, dimensions, countInStock 
     } = req.body;
 
     const product = new Product({
@@ -66,6 +66,8 @@ const createProduct = async (req, res) => {
       type,
       brand,
       discount,
+      material,
+      packageIncludes,
       dimensions,
       countInStock,
     });
@@ -90,7 +92,7 @@ const updateProduct = async (req, res) => {
     const { 
       name, price, description, image, images, colors, 
       showColors, category, type, brand, discount, 
-      dimensions, countInStock 
+      material, packageIncludes, dimensions, countInStock 
     } = req.body;
 
     const product = await Product.findById(req.params.id);
@@ -107,6 +109,8 @@ const updateProduct = async (req, res) => {
       product.type = type || product.type;
       product.brand = brand || product.brand;
       product.discount = discount || product.discount;
+      product.material = material !== undefined ? material : product.material;
+      product.packageIncludes = packageIncludes !== undefined ? packageIncludes : product.packageIncludes;
       product.dimensions = dimensions || product.dimensions;
       product.countInStock = countInStock !== undefined ? countInStock : product.countInStock;
 
@@ -212,6 +216,43 @@ const uploadImage = async (req, res) => {
   }
 };
 
+// @desc    Upload multiple images to Cloudinary
+// @route   POST /api/products/upload-multiple
+// @access  Private/Admin
+const uploadImages = async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: 'No files uploaded' });
+    }
+
+    const { v2: cloudinary } = await import('cloudinary');
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
+    });
+
+    const uploadPromises = req.files.map(file => {
+      return new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { folder: 'products' },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve({ url: result.secure_url, public_id: result.public_id });
+          }
+        );
+        stream.end(file.buffer);
+      });
+    });
+
+    const results = await Promise.all(uploadPromises);
+    res.json(results);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error during plural upload', error: error.message });
+  }
+};
+
 // Helper to safely delete from Cloudinary
 const deleteImage = async (req, res) => {
   const { public_id } = req.body;
@@ -303,5 +344,6 @@ export {
   deleteProduct, 
   deleteImage, 
   uploadImage, 
+  uploadImages,
   createProductReview 
 };

@@ -78,9 +78,9 @@ const productSchema = new mongoose.Schema(
       type: String,
     },
     dimensions: {
-      width: Number,
-      height: Number,
-      length: Number,
+      width: String,
+      height: String,
+      length: String,
     },
     reviews: [reviewSchema],
     rating: {
