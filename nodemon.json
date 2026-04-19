@@ -1,0 +1,22 @@
+{
+  "watch": [
+    "server.js",
+    "routes/",
+    "controllers/",
+    "models/",
+    "middleware/",
+    "utils/"
+  ],
+  "ext": "js,json,env",
+  "ignore": [
+    "node_modules/",
+    "frontend/"
+  ],
+  "events": {
+    "restart": "echo 'API change detected. Restarting backend server...'"
+  },
+  "execMap": {
+    "js": "node"
+  },
+  "delay": "1500"
+}

@@ -1,0 +1,323 @@
+import User from '../models/User.js';
+import Cart from '../models/Cart.js';
+import Favorite from '../models/Favorite.js';
+import jwt from 'jsonwebtoken';
+import Product from '../models/Product.js';
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
+
+// Helper function to generate JWT
+const generateToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
+    expiresIn: '30d',
+  });
+};
+
+// @desc    Register a new user
+// @route   POST /api/users/signup
+// @access  Public
+const signup = async (req, res) => {
+  const { username, email, phone, password } = req.body;
+
+  try {
+    let user = await User.findOne({ email });
+
+    if (user) {
+      return res.status(400).json({ message: 'User with this email already exists' });
+    }
+
+    user = await User.create({
+      username,
+      email,
+      phone,
+      password,
+    });
+
+    const token = generateToken(user._id);
+    user.currentSessionToken = token;
+    await user.save();
+
+    res.status(201).json({
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        favorites: [],
+        cart: [],
+      },
+      token,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Sign in user
+// @route   POST /api/users/signin
+// @access  Public
+const signin = async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    // Need to include password in select
+    const user = await User.findOne({ email }).select('+password');
+
+    if (!user) {
+      return res.status(404).json({ message: 'Invalid email or password' });
+    }
+
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+
+    const token = generateToken(user._id);
+    user.currentSessionToken = token;
+    await user.save();
+
+    // Fetch separate collections
+    const [cart, favorites] = await Promise.all([
+      Cart.find({ user: user._id }).populate('product'),
+      Favorite.find({ user: user._id })
+    ]);
+
+    res.status(200).json({
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        favorites: favorites.map(f => f.product.toString()),
+        cart: cart,
+      },
+      token,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Forgot Password - Send reset link
+// @route   POST /api/users/forgotpassword
+const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'There is no user with that email' });
+    }
+
+    // Generate reset token
+    const resetToken = crypto.randomBytes(20).toString('hex');
+    user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 mins
+
+    await user.save();
+
+    // In a real app, send email. For now, we'll return the token in response for development
+    // (User requested forget password conditions)
+
+    // SMTP LOGIC (Placeholder)
+    /*
+    const transporter = nodemailer.createTransport({ ... });
+    await transporter.sendMail({ ... });
+    */
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset link generated',
+      resetToken // Returning this so frontend can proceed in dev
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Reset Password
+// @route   PUT /api/users/resetpassword/:resettoken
+const resetPassword = async (req, res) => {
+  try {
+    const resetPasswordToken = crypto
+      .createHash('sha256')
+      .update(req.params.resettoken)
+      .digest('hex');
+
+    const user = await User.findOne({
+      resetPasswordToken,
+      resetPasswordExpire: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid or expired reset token' });
+    }
+
+    // Set new password
+    user.password = req.body.password;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+
+    res.status(200).json({ success: true, message: 'Password reset successful' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Add product to favorites
+const addToFavorites = async (req, res) => {
+  const { productId } = req.body;
+  try {
+    const existing = await Favorite.findOne({ user: req.user._id, product: productId });
+    if (existing) return res.status(400).json({ message: 'Product already in favorites' });
+    await Favorite.create({ user: req.user._id, product: productId });
+    const favorites = await Favorite.find({ user: req.user._id });
+    res.status(200).json({ message: 'Product added to favorites', favorites: favorites.map(f => f.product.toString()) });
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+const removeFromFavorites = async (req, res) => {
+  const { productId } = req.params;
+  try {
+    await Favorite.findOneAndDelete({ user: req.user._id, product: productId });
+    const favorites = await Favorite.find({ user: req.user._id });
+    res.status(200).json({ message: 'Product removed from favorites', favorites: favorites.map(f => f.product.toString()) });
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+const getFavorites = async (req, res) => {
+  try {
+    const favorites = await Favorite.find({ user: req.user._id }).populate('product');
+    res.status(200).json(favorites);
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+const addToCart = async (req, res) => {
+  const { productId, quantity, selectedColor = null } = req.body;
+  try {
+    const product = await Product.findById(productId);
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+    let cartItem = await Cart.findOne({ user: req.user._id, product: productId, selectedColor });
+    if (cartItem) {
+      cartItem.quantity += (quantity || 1);
+      await cartItem.save();
+    } else {
+      await Cart.create({ user: req.user._id, product: productId, quantity: quantity || 1, selectedColor });
+    }
+    const cart = await Cart.find({ user: req.user._id }).populate('product');
+    res.status(200).json({ message: 'Product added to cart', cart });
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+const removeFromCart = async (req, res) => {
+  const { productId } = req.params;
+  const selectedColor = req.query.selectedColor;
+  try {
+    await Cart.findOneAndDelete({ user: req.user._id, product: productId, selectedColor });
+    const cart = await Cart.find({ user: req.user._id }).populate('product');
+    res.status(200).json({ message: 'Product removed from cart', cart });
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+const updateCartQuantity = async (req, res) => {
+  const { productId, quantity, selectedColor = null } = req.body;
+  try {
+    const cartItem = await Cart.findOne({ user: req.user._id, product: productId, selectedColor });
+    if (cartItem) {
+      cartItem.quantity = quantity;
+      await cartItem.save();
+      const cart = await Cart.find({ user: req.user._id }).populate('product');
+      res.status(200).json({ message: 'Cart updated', cart });
+    } else { res.status(404).json({ message: 'Product not found in cart' }); }
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+const getCart = async (req, res) => {
+  try {
+    const cart = await Cart.find({ user: req.user._id }).populate('product');
+    res.status(200).json(cart);
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+const getProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    res.json(user);
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+const updateProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).select('+password');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Handle Password Update
+    if (req.body.password) {
+      if (!req.body.currentPassword) {
+        return res.status(400).json({ message: 'Current password is required to set a new one' });
+      }
+      const isMatch = await user.matchPassword(req.body.currentPassword);
+      if (!isMatch) {
+        return res.status(401).json({ message: 'Current password is incorrect' });
+      }
+      user.password = req.body.password;
+    }
+
+    // Update other fields
+    user.username = req.body.username || user.username;
+    user.firstName = req.body.firstName || user.firstName;
+    user.lastName = req.body.lastName || user.lastName;
+    user.email = req.body.email || user.email;
+    user.phone = req.body.phone || user.phone;
+    user.gender = req.body.gender || user.gender;
+    user.image = req.body.image || user.image;
+
+    const updatedUser = await user.save();
+    res.json({
+      _id: updatedUser._id,
+      username: updatedUser.username,
+      email: updatedUser.email,
+      phone: updatedUser.phone,
+      firstName: updatedUser.firstName,
+      lastName: updatedUser.lastName,
+      image: updatedUser.image,
+      gender: updatedUser.gender,
+      role: updatedUser.role,
+    });
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+const getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find({ role: { $ne: 'ADMIN' } }).sort({ createdAt: -1 });
+    res.json(users);
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+const updateUserRole = async (req, res) => {
+  try {
+    const user = await User.findByIdAndUpdate(req.params.id, { role: req.body.role }, { new: true });
+    res.json(user);
+  } catch (error) { res.status(500).json({ message: error.message }); }
+};
+
+export {
+  signup,
+  signin,
+  forgotPassword,
+  resetPassword,
+  addToFavorites,
+  removeFromFavorites,
+  getFavorites,
+  addToCart,
+  removeFromCart,
+  updateCartQuantity,
+  getCart,
+  getProfile,
+  updateProfile,
+  getAllUsers,
+  updateUserRole,
+};
