@@ -18,39 +18,99 @@ const generateToken = (id) => {
 // @route   POST /api/users/signup
 // @access  Public
 const signup = async (req, res) => {
-  const { username, email, phone, password } = req.body;
+  const { username, email, phone } = req.body;
 
   try {
-    let user = await User.findOne({ email });
+    const existingPhoneUser = await User.findOne({ phone });
+    if (existingPhoneUser && existingPhoneUser.email !== email) {
+      return res.status(400).json({ message: 'User with this phone number already exists' });
+    }
+
+    let user = await User.findOne({ email }).select('+password');
 
     if (user) {
-      return res.status(400).json({ message: 'User with this email already exists' });
+      if (user.password) {
+        return res.status(400).json({ message: 'User with this email already exists' });
+      } else {
+        // User exists but hasn't set password. Resend setup link.
+        const setupToken = crypto.randomBytes(20).toString('hex');
+        user.resetPasswordToken = crypto.createHash('sha256').update(setupToken).digest('hex');
+        user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 mins
+
+        await user.save();
+
+        const setupUrl = `${process.env.FRONTEND_URL}/set-password/${setupToken}`;
+
+        await sendEmail({
+          email: user.email,
+          subject: 'Complete your Navinila Registration',
+          message: `Please complete your registration by setting your password at: \n\n ${setupUrl}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+              <h2 style="color: #38bdf8; text-align: center;">Complete Your Registration</h2>
+              <p>Hello ${user.username || 'User'},</p>
+              <p>You requested to sign up for a Navinila account. Click the button below to set your password and complete your registration:</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${setupUrl}" style="background-color: #38bdf8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Set Password</a>
+              </div>
+              <p>This link will expire in 10 minutes.</p>
+              <p>If you didn't request this, please ignore this email.</p>
+              <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+              <p style="font-size: 12px; color: #94a3b8; text-align: center;">&copy; ${new Date().getFullYear()} Navinila. All rights reserved.</p>
+            </div>
+          `
+        });
+
+        return res.status(200).json({ message: 'Account exists but password is not set. A new setup link has been sent to your email.' });
+      }
     }
 
     user = await User.create({
       username,
       email,
       phone,
-      password,
     });
 
-    const token = generateToken(user._id);
-    user.currentSessionToken = token;
+    const setupToken = crypto.randomBytes(20).toString('hex');
+    user.resetPasswordToken = crypto.createHash('sha256').update(setupToken).digest('hex');
+    user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 mins
+
     await user.save();
 
+    const setupUrl = `${process.env.FRONTEND_URL}/set-password/${setupToken}`;
+
+    await sendEmail({
+      email: user.email,
+      subject: 'Complete your Navinila Registration',
+      message: `Welcome to Navinila! Please complete your registration by setting your password at: \n\n ${setupUrl}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+          <h2 style="color: #38bdf8; text-align: center;">Complete Your Registration</h2>
+          <p>Hello ${user.username || 'User'},</p>
+          <p>Welcome to Navinila! Click the button below to set your password and complete your registration:</p>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${setupUrl}" style="background-color: #38bdf8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Set Password</a>
+          </div>
+          <p>This link will expire in 10 minutes.</p>
+          <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+          <p style="font-size: 12px; color: #94a3b8; text-align: center;">&copy; ${new Date().getFullYear()} Navinila. All rights reserved.</p>
+        </div>
+      `
+    });
+
     res.status(201).json({
-      user: {
-        _id: user._id,
-        username: user.username,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        favorites: [],
-        cart: [],
-      },
-      token,
+      message: 'Registration started! Please check your email to set your password.',
     });
   } catch (error) {
+    if (error.code === 11000) {
+      if (error.keyPattern && error.keyPattern.phone) {
+        return res.status(400).json({ message: 'User with this phone number already exists' });
+      }
+      if (error.keyPattern && error.keyPattern.email) {
+        return res.status(400).json({ message: 'User with this email already exists' });
+      }
+      return res.status(400).json({ message: 'An account with this information already exists' });
+    }
     res.status(500).json({ message: error.message });
   }
 };
@@ -67,6 +127,41 @@ const signin = async (req, res) => {
 
     if (!user) {
       return res.status(404).json({ message: 'Invalid email or password' });
+    }
+
+    if (!user.password) {
+      // User hasn't set password yet. Resend setup link.
+      const setupToken = crypto.randomBytes(20).toString('hex');
+      user.resetPasswordToken = crypto.createHash('sha256').update(setupToken).digest('hex');
+      user.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 mins
+      await user.save();
+
+      const setupUrl = `${process.env.FRONTEND_URL}/set-password/${setupToken}`;
+      
+      try {
+        await sendEmail({
+          email: user.email,
+          subject: 'Complete your Navinila Registration',
+          message: `Please complete your registration by setting your password at: \n\n ${setupUrl}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+              <h2 style="color: #38bdf8; text-align: center;">Complete Your Registration</h2>
+              <p>Hello ${user.username || 'User'},</p>
+              <p>You tried to sign in but haven't set a password yet. Click the button below to set your password:</p>
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="${setupUrl}" style="background-color: #38bdf8; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Set Password</a>
+              </div>
+              <p>This link will expire in 10 minutes.</p>
+              <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+              <p style="font-size: 12px; color: #94a3b8; text-align: center;">&copy; ${new Date().getFullYear()} Navinila. All rights reserved.</p>
+            </div>
+          `
+        });
+      } catch (err) {
+        console.error("Email error:", err);
+      }
+
+      return res.status(403).json({ message: 'You haven\'t set a password yet. A setup link has been sent to your email.' });
     }
 
     const isMatch = await user.matchPassword(password);
@@ -185,9 +280,32 @@ const resetPassword = async (req, res) => {
     user.password = req.body.password;
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
+    
+    // Generate token for automatic login
+    const token = generateToken(user._id);
+    user.currentSessionToken = token;
     await user.save();
 
-    res.status(200).json({ success: true, message: 'Password reset successful' });
+    // Fetch separate collections for user data
+    const [cart, favorites] = await Promise.all([
+      Cart.find({ user: user._id }).populate('product'),
+      Favorite.find({ user: user._id })
+    ]);
+
+    res.status(200).json({ 
+      success: true, 
+      message: 'Password update successful. Logging you in...',
+      user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        favorites: favorites.map(f => f.product.toString()),
+        cart: cart,
+      },
+      token,
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

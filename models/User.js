@@ -22,8 +22,6 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: [true, 'Please add a password'],
-      minlength: 6,
       select: false,
     },
     image: { type: String, default: '' },
@@ -47,10 +45,9 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// Hash password before saving - Using pure async/await pattern without 'next' 
-// to avoid "next is not defined" or scoping issues in different Mongoose/Express versions.
+// Hash password before saving
 userSchema.pre('save', async function () {
-  if (!this.isModified('password')) {
+  if (!this.isModified('password') || !this.password) {
     return;
   }
   const salt = await bcrypt.genSalt(10);
