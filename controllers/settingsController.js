@@ -11,6 +11,7 @@ const getSettings = async (req, res) => {
       settings = await Settings.create({
         gst: 18,
         deliveryFee: 50,
+        freeDeliveryThreshold: 0,
         heroSection: [
           {
             image: "https://res.cloudinary.com/demo/image/upload/v1631234567/sample.jpg",
@@ -32,12 +33,13 @@ const getSettings = async (req, res) => {
 // @access  Private/Admin
 const updateSettings = async (req, res) => {
   try {
-    const { gst, deliveryFee, heroSection } = req.body;
+    const { gst, deliveryFee, heroSection, freeDeliveryThreshold } = req.body;
     let settings = await Settings.findOne();
 
     if (settings) {
       settings.gst = gst !== undefined ? gst : settings.gst;
       settings.deliveryFee = deliveryFee !== undefined ? deliveryFee : settings.deliveryFee;
+      settings.freeDeliveryThreshold = freeDeliveryThreshold !== undefined ? freeDeliveryThreshold : settings.freeDeliveryThreshold;
       settings.heroSection = heroSection || settings.heroSection;
       
       const updatedSettings = await settings.save();
@@ -46,6 +48,7 @@ const updateSettings = async (req, res) => {
       const newSettings = await Settings.create({
         gst,
         deliveryFee,
+        freeDeliveryThreshold,
         heroSection
       });
       res.status(201).json(newSettings);
