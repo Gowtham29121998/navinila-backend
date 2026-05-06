@@ -126,7 +126,7 @@ const signin = async (req, res) => {
     const user = await User.findOne({ email }).select('+password');
 
     if (!user) {
-      return res.status(404).json({ message: 'Invalid email or password' });
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     if (!user.password) {
@@ -408,6 +408,28 @@ const updateProfile = async (req, res) => {
         return res.status(401).json({ message: 'Current password is incorrect' });
       }
       user.password = req.body.password;
+    }
+
+    // Handle image cleanup from Cloudinary
+    if (req.body.image && user.image && req.body.image !== user.image && user.image.includes('cloudinary.com')) {
+      const urlParts = user.image.split('/upload/');
+      if (urlParts.length === 2) {
+        const afterUpload = urlParts[1];
+        const publicIdWithExt = afterUpload.substring(afterUpload.indexOf('/') + 1);
+        const publicId = publicIdWithExt.split('.')[0];
+        try {
+          const { v2: cloudinary } = await import('cloudinary');
+          cloudinary.config({
+            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+            api_key: process.env.CLOUDINARY_API_KEY,
+            api_secret: process.env.CLOUDINARY_API_SECRET,
+          });
+          await cloudinary.uploader.destroy(publicId);
+          console.log("Deleted old profile image from Cloudinary:", publicId);
+        } catch (err) {
+          console.error("Cloudinary delete error:", err);
+        }
+      }
     }
 
     // Update other fields

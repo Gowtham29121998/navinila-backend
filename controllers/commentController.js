@@ -34,7 +34,7 @@ const createComment = async (req, res) => {
 const getProductComments = async (req, res) => {
   try {
     const comments = await Comment.find({ product: req.params.productId })
-      .populate('user', 'username profileImage') // Aggregate user data
+      .populate('user', 'username image') // Aggregate user data
       .sort({ createdAt: -1 });
 
     res.json(comments);

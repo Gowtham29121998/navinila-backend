@@ -37,6 +37,42 @@ const updateSettings = async (req, res) => {
     let settings = await Settings.findOne();
 
     if (settings) {
+      // Find deleted hero section images and remove from Cloudinary
+      if (heroSection) {
+        const oldImages = settings.heroSection.map(item => item.image);
+        const newImages = heroSection.map(item => item.image);
+        const deletedImages = oldImages.filter(img => !newImages.includes(img) && img.includes('cloudinary.com'));
+
+        if (deletedImages.length > 0) {
+          const { v2: cloudinary } = await import('cloudinary');
+          cloudinary.config({
+            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+            api_key: process.env.CLOUDINARY_API_KEY,
+            api_secret: process.env.CLOUDINARY_API_SECRET,
+          });
+
+          for (const imgUrl of deletedImages) {
+            try {
+              const urlParts = imgUrl.split('/upload/');
+              if (urlParts.length > 1) {
+                const afterUpload = urlParts[1];
+                const parts = afterUpload.split('/');
+                if (parts[0].startsWith('v') && !isNaN(parts[0].substring(1))) {
+                  parts.shift();
+                }
+                const pathWithExtension = parts.join('/');
+                const publicId = pathWithExtension.split('.')[0];
+                
+                await cloudinary.uploader.destroy(publicId);
+                console.log("Deleted from Cloudinary:", publicId);
+              }
+            } catch (err) {
+              console.error("Cloudinary delete error:", err);
+            }
+          }
+        }
+      }
+
       settings.gst = gst !== undefined ? gst : settings.gst;
       settings.deliveryFee = deliveryFee !== undefined ? deliveryFee : settings.deliveryFee;
       settings.freeDeliveryThreshold = freeDeliveryThreshold !== undefined ? freeDeliveryThreshold : settings.freeDeliveryThreshold;

@@ -15,10 +15,12 @@ router.get('/', getProducts);
 router.get('/category/:categoryId', getProductsByCategory);
 router.get('/:id', getProductById);
 
+// Authenticated Routes (Any user)
+router.post('/upload', protect, upload.single('image'), uploadImage);
+router.post('/upload-multiple', protect, upload.array('images', 10), uploadImages);
+
 // Admin Routes (Protected)
 router.post('/', protect, admin, createProduct);
-router.post('/upload', protect, admin, upload.single('image'), uploadImage);
-router.post('/upload-multiple', protect, admin, upload.array('images', 10), uploadImages);
 router.post('/delete', protect, admin, deleteImage);
 
 router.route('/:id')
