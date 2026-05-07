@@ -111,6 +111,7 @@ const verifyAndOrder = async (req, res) => {
       promoCode,
       subtotal,
       discount,
+      gstAmount,
       deliveryFee,
       totalPrice,
     });

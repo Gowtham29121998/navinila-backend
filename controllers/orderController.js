@@ -8,7 +8,14 @@ import Address from '../models/Address.js';
 // @access  Private
 const createOrder = async (req, res) => {
   try {
-    const { addressId, paymentMethod = 'Cash on Delivery', promoCode = '', discount = 0, deliveryFee = 0 } = req.body;
+    const { 
+      addressId, 
+      paymentMethod = 'Cash on Delivery', 
+      promoCode = '', 
+      discount = 0, 
+      deliveryFee = 0,
+      gstAmount = 0
+    } = req.body;
 
     // 1. Validate address belongs to user
     const address = await Address.findOne({ _id: addressId, user: req.user._id });
@@ -78,7 +85,7 @@ const createOrder = async (req, res) => {
 
     // 4. Calculate subtotal
     const subtotal = orderItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
-    const totalPrice = Math.max(0, subtotal + deliveryFee - discount);
+    const totalPrice = Math.max(0, subtotal + deliveryFee + gstAmount - discount);
 
     // 5. Create the order
     const order = await Order.create({
@@ -100,6 +107,7 @@ const createOrder = async (req, res) => {
       promoCode,
       subtotal,
       discount,
+      gstAmount,
       deliveryFee,
       totalPrice,
     });
@@ -156,11 +164,20 @@ const getMyOrders = async (req, res) => {
 // @access  Private
 const getOrderById = async (req, res) => {
   try {
-    const order = await Order.findOne({ _id: req.params.id, user: req.user._id })
-      .populate('items.product', 'name image price brand');
+    let order;
+    if (req.user.role === 'ADMIN') {
+      order = await Order.findById(req.params.id)
+        .populate('user', 'username email')
+        .populate('items.product', 'name image price brand');
+    } else {
+      order = await Order.findOne({ _id: req.params.id, user: req.user._id })
+        .populate('items.product', 'name image price brand');
+    }
+    
     if (!order) return res.status(404).json({ message: 'Order not found' });
     res.json(order);
   } catch (error) {
+    console.error('Get order error:', error);
     res.status(500).json({ message: 'Server Error' });
   }
 };
